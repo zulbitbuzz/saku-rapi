@@ -143,6 +143,18 @@ h2{font-family:var(--display);font-size:16px;font-weight:700;margin:0;text-wrap:
 .kv{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:8px 0;border-bottom:1px solid var(--line)}
 .kv span:first-child{color:var(--muted)}
 .kv span:last-child{text-align:right;min-width:0;overflow-wrap:anywhere}
+.field textarea{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:11px 12px;width:100%;min-width:0;font:inherit;color:inherit;resize:vertical}
+.scan{background:var(--tile);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--muted)}
+.alert{background:var(--surface);border:1px solid var(--out);border-radius:14px;padding:10px 12px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.pay{padding:8px 12px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-size:13px;font-weight:600;flex:none}
+.pay.del{background:var(--tile);color:var(--out)}
+.search{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px;width:100%}
+.brow{display:flex;align-items:center;gap:10px}
+.brow label{flex:1;min-width:0;font-size:14px}
+.brow input{width:150px;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:9px 12px;text-align:right}
+.cats.emo{grid-template-columns:repeat(6,1fr)}
+.cats.emo .cat{padding:8px 2px}
+.fill{display:block}
 .top-btns{display:flex;gap:8px}
 .icon-btn{width:40px;height:40px;border-radius:12px;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center}
 .icon-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -166,7 +178,7 @@ h2{font-family:var(--display);font-size:16px;font-weight:700;margin:0;text-wrap:
     <div><h1 id="title">Saku Rapi</h1><p id="subtitle"></p></div>
     <div class="top-btns">
       <button class="icon-btn" id="eye" data-act="hide"></button>
-      <button class="icon-btn" data-act="security" aria-label="Keamanan dan PIN"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
+      <button class="icon-btn" data-act="security" aria-label="Pengaturan"><svg viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></svg></button>
     </div>
   </div>
   <div class="note" id="sampleNote" hidden>
@@ -209,7 +221,8 @@ const CATS = {
   in:[['gaji','💼','Gaji'],['bonus','🎉','Bonus'],['hasil','🌱','Hasil investasi'],['setoran','📥','Setoran kas'],['lain-in','🪙','Lainnya']]
 };
 const WALLET_EMOJI = ['🏦','🏛️','💵','📱','💳','🗄️','📈','🪙','🏠','🤝','🐷','💼'];
-const catOf = id => [...CATS.out, ...CATS.in].find(c => c[0] === id) || ['', '📦', 'Lainnya'];
+const cats = t => [...(CATS[t] || []), ...((S.cats && S.cats[t]) || [])];
+const catOf = id => [...cats('out'), ...cats('in')].find(c => c[0] === id) || ['', '📦', 'Lainnya'];
 
 const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 const ago = n => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
@@ -283,9 +296,16 @@ const dayLabel = d => { if (d === ago(0)) return 'Hari ini'; if (d === ago(1)) r
 const ymLabel = ym => { const [y, m] = ym.split('-').map(Number);
   return new Date(y, m-1, 1).toLocaleDateString('id-ID', {month:'long', year:'numeric'}); };
 
+function billsNow(){ const ym = ago(0).slice(0,7), day = Number(ago(0).slice(8));
+  return (S.bills || []).map(b => ({...b, done:!!(b.paid && b.paid[ym]), late:day > b.day})); }
+function budgetRows(ym){ const spent = {};
+  S.txs.forEach(t => { const w = wal(t.wallet);
+    if (t.type === 'out' && w && w.group === 'pribadi' && t.date.slice(0,7) === ym) spent[t.cat] = (spent[t.cat] || 0) + t.amount; });
+  return Object.entries(S.budgets || {}).filter(e => e[1] > 0).map(([id, lim]) => ({c:catOf(id), lim, used:spent[id] || 0, pct:Math.round((spent[id] || 0) / lim * 100)})); }
+
 function renderBeranda(){
-  const f = flow('pribadi', iso(new Date()).slice(0,7));
-  const recent = sorted().slice(0, 5);
+  const ym = ago(0).slice(0,7), f = flow('pribadi', ym);
+  const recent = sorted().slice(0, 5), bills = billsNow(), warn = budgetRows(ym).filter(r => r.pct >= 80);
   return `
   <section class="hero">
     <div><div class="lbl">Saldo pribadi</div><div class="big num">${sal(groupTotal('pribadi'))}</div></div>
@@ -294,37 +314,52 @@ function renderBeranda(){
       <div class="mini"><span>Keluar bulan ini</span><b class="num">${sal(f.o)}</b></div>
     </div>
   </section>
+  ${warn.length ? `<div class="alert">${warn.map(r => `<div>${r.c[1]} Anggaran <b>${esc(r.c[2])}</b> ${r.pct >= 100 ? 'sudah habis' : 'hampir habis'} (${r.pct}%)</div>`).join('')}</div>` : ''}
   <section class="sec">
     <div class="sec-head"><h2>Dana terpisah</h2><small>Tidak dihitung di saldo pribadi</small></div>
     <div class="funds">${['kantor','investasi','piutang'].map(g =>
       `<button class="fund" data-go="dompet"><span class="e">${GROUPS[g].emoji}</span><span>${GROUPS[g].label}</span><b class="num">${sal(groupTotal(g))}</b></button>`).join('')}</div>
   </section>
   <section class="sec">
+    <div class="sec-head"><h2>Tagihan rutin</h2><button class="link" data-act="bills">Kelola</button></div>
+    <div class="list">${bills.length ? bills.map(b => `<div class="item"><span class="ico">${catOf(b.cat)[1]}</span><span class="mid"><b>${esc(b.name)}</b><span${!b.done && b.late ? ' style="color:var(--out)"' : ''}>${b.done ? 'Sudah dibayar bulan ini' : (b.late ? 'Lewat jatuh tempo' : 'Jatuh tempo') + ' tgl ' + b.day} · ${rp(b.amount)}</span></span>${b.done ? '<span class="amt in">✓</span>' : `<button class="pay" data-pay="${b.id}">Bayar</button>`}</div>`).join('')
+      : '<div class="empty">Belum ada. Ketuk Kelola untuk menambah listrik, internet, atau cicilan.</div>'}</div>
+  </section>
+  <section class="sec">
     <div class="sec-head"><h2>Transaksi terakhir</h2><button class="link" data-go="transaksi">Lihat semua</button></div>
     <div class="list">${recent.length ? recent.map(txRow).join('') : '<div class="empty">Belum ada transaksi. Ketuk tombol + untuk mencatat yang pertama.</div>'}</div>
   </section>`;
 }
+let search = '';
+function txListHtml(){
+  const q = search.trim().toLowerCase();
+  const list = sorted().filter(t => (filter === 'semua' || inGroup(t, filter))
+    && (!q || [t.note, catOf(t.cat)[2], (wal(t.wallet) || {}).name, (wal(t.to) || {}).name].join(' ').toLowerCase().includes(q)));
+  if (!list.length) return '<div class="list"><div class="empty">Tidak ada transaksi di sini.</div></div>';
+  const days = {}; list.forEach(t => (days[t.date] = days[t.date] || []).push(t));
+  return Object.keys(days).map(d => `<section class="sec"><div class="day">${dayLabel(d)}</div><div class="list">${days[d].map(txRow).join('')}</div></section>`).join('');
+}
 function renderTransaksi(){
   const chips = [['semua','Semua'], ...Object.keys(GROUPS).map(g => [g, GROUPS[g].label])];
-  const list = sorted().filter(t => filter === 'semua' || inGroup(t, filter));
-  let html = `<div class="chips">${chips.map(c => `<button class="chip" data-filter="${c[0]}" aria-pressed="${filter === c[0]}">${c[1]}</button>`).join('')}</div>`;
-  if (!list.length) return html + '<div class="list"><div class="empty">Tidak ada transaksi di sini.</div></div>';
-  const days = {}; list.forEach(t => (days[t.date] = days[t.date] || []).push(t));
-  Object.keys(days).forEach(d => { html += `<section class="sec"><div class="day">${dayLabel(d)}</div><div class="list">${days[d].map(txRow).join('')}</div></section>`; });
-  return html;
+  return `<input class="search" id="q" type="search" placeholder="Cari catatan, kategori, atau dompet" value="${esc(search)}" autocomplete="off" aria-label="Cari transaksi">
+  <div class="chips">${chips.map(c => `<button class="chip" data-filter="${c[0]}" aria-pressed="${filter === c[0]}">${c[1]}</button>`).join('')}</div>
+  <div id="txList" class="sec" style="gap:18px">${txListHtml()}</div>`;
 }
 function renderDompet(){
   let html = '';
   Object.keys(GROUPS).forEach(g => { const ws = S.wallets.filter(w => w.group === g);
     html += `<section class="sec"><div class="sec-head"><h2>${GROUPS[g].emoji} ${GROUPS[g].label}</h2><span class="group-total num">${sal(groupTotal(g))}</span></div>
-    <div class="list">${ws.length ? ws.map(w => `<div class="item"><span class="ico">${esc(w.emoji)}</span><span class="mid"><b>${esc(w.name)}</b><span>${GROUPS[g].desc}</span></span><span class="amt num">${sal(bal(w))}</span></div>`).join('') : '<div class="empty">Belum ada dompet di kelompok ini.</div>'}</div></section>`; });
-  return html + '<button class="ghost" data-act="wallet">+ Tambah dompet</button>';
+    <div class="list">${ws.length ? ws.map(w => { const pct = w.target ? Math.round(bal(w) / w.target * 100) : 0;
+      return `<button class="item" data-wallet="${w.id}"><span class="ico">${esc(w.emoji)}</span><span class="mid"><b>${esc(w.name)}</b><span>${w.target ? `Target ${sal(w.target)} · ${pct}%` : GROUPS[g].desc}</span>${w.target ? `<span class="track"><span class="fill" style="width:${Math.min(100, Math.max(0, pct))}%"></span></span>` : ''}</span><span class="amt num">${sal(bal(w))}</span></button>`; }).join('')
+      : '<div class="empty">Belum ada dompet di kelompok ini.</div>'}</div></section>`; });
+  return html + '<button class="ghost" data-act="wallet">+ Tambah dompet</button><p class="hint" style="text-align:center">Ketuk dompet untuk mengubah nama, saldo, atau target.</p>';
 }
 function renderLaporan(){
   const f = flow(repGroup, repYm), by = {};
   S.txs.forEach(t => { const w = wal(t.wallet);
     if (t.type === 'out' && w && w.group === repGroup && t.date.slice(0,7) === repYm) by[t.cat] = (by[t.cat] || 0) + t.amount; });
   const rows = Object.entries(by).sort((a, b) => b[1] - a[1]), max = rows.length ? rows[0][1] : 1;
+  const br = repGroup === 'pribadi' ? budgetRows(repYm) : [];
   return `
   <div class="chips">${['pribadi','kantor'].map(g => `<button class="chip" data-rep="${g}" aria-pressed="${repGroup === g}">${GROUPS[g].label}</button>`).join('')}</div>
   <div class="month"><button data-month="-1" aria-label="Bulan sebelumnya">‹</button><b>${ymLabel(repYm)}</b><button data-month="1" aria-label="Bulan berikutnya">›</button></div>
@@ -333,6 +368,9 @@ function renderLaporan(){
     <div class="stat"><span>Keluar</span><b class="num" style="color:var(--out)">${rp(f.o)}</b></div>
     <div class="stat"><span>Selisih</span><b class="num">${rp(f.i - f.o)}</b></div>
   </div>
+  ${repGroup === 'pribadi' ? `<section class="sec"><div class="sec-head"><h2>Anggaran</h2><button class="link" data-act="budgets">Atur</button></div>
+  ${br.length ? `<div class="bars">${br.map(r => `<div><div class="bar-top"><span>${r.c[1]} ${esc(r.c[2])}</span><span class="num"${r.pct >= 100 ? ' style="color:var(--out)"' : ''}><b>${rp(r.used)}</b> dari ${rp(r.lim)}</span></div><div class="track"><div class="fill" style="width:${Math.min(100, r.pct)}%${r.pct >= 80 ? ';background:var(--out)' : ''}"></div></div></div>`).join('')}</div>`
+    : '<div class="list"><div class="empty">Belum ada anggaran. Ketuk Atur untuk memberi batas per kategori.</div></div>'}</section>` : ''}
   <section class="sec"><h2>Pengeluaran per kategori</h2>
   ${rows.length ? `<div class="bars">${rows.map(([id, v]) => { const c = catOf(id);
     return `<div><div class="bar-top"><span>${c[1]} ${esc(c[2])}</span><span class="num"><b>${rp(v)}</b> · ${f.o ? Math.round(v / f.o * 100) : 0}%</span></div><div class="track"><div class="fill" style="width:${Math.max(3, v / max * 100)}%"></div></div></div>`; }).join('')}</div>`
@@ -358,9 +396,20 @@ const walletOpts = sel => Object.keys(GROUPS).map(g => { const ws = S.wallets.fi
   return ws.length ? `<optgroup label="${GROUPS[g].label}">${ws.map(w => `<option value="${w.id}"${w.id === sel ? ' selected' : ''}>${esc(w.name)}</option>`).join('')}</optgroup>` : ''; }).join('');
 
 let form = {type:'out', cat:'makan'};
-function openAdd(){
-  form = {type:'out', cat:'makan'};
-  openSheet(`${head('Catat transaksi')}
+function openAdd(tx){
+  form = {type:'out', cat:'makan', id:tx ? tx.id : ''};
+  openSheet(`${head(tx ? 'Ubah transaksi' : 'Catat transaksi')}
+    <div class="two">
+      <label class="ghost" for="fShot">📷 Baca screenshot</label>
+      <button class="ghost" data-act="paste">📋 Tempel teks</button>
+    </div>
+    <input id="fShot" type="file" accept="image/*" hidden>
+    <div class="field" id="pasteBox" hidden>
+      <label for="fPaste">Tempel isi notifikasi atau SMS bank</label>
+      <textarea id="fPaste" rows="3" placeholder="Contoh: Transfer Rp 150.000 ke PERTAMINA berhasil"></textarea>
+      <button class="primary" data-act="readPaste">Baca teks</button>
+    </div>
+    <div class="scan" id="scan" hidden></div>
     <div class="seg" id="seg">
       <button data-type="out" aria-pressed="true">Pengeluaran</button>
       <button data-type="in" aria-pressed="false">Pemasukan</button>
@@ -375,16 +424,16 @@ function openAdd(){
     </div>
     <div class="field" id="dateField2" hidden><label for="fDate2">Tanggal</label><input id="fDate2" type="date" value="${ago(0)}"></div>
     <div class="field"><label for="fNote">Catatan</label><input id="fNote" placeholder="Contoh: makan siang" maxlength="60"></div>
-    <label class="ghost" for="fShot">📷 Lampirkan screenshot atau struk</label>
-    <input id="fShot" type="file" accept="image/*" hidden>
-    <div class="shot" id="shot" hidden></div>
     <p class="err" id="fErr" hidden></p>
     <button class="primary" data-act="save">Simpan</button>`);
   drawCats();
+  if (tx) { setType(tx.type); if (tx.type !== 'transfer') { form.cat = tx.cat; drawCats(); }
+    $('fAmount').value = tx.amount.toLocaleString('id-ID'); $('fWallet').value = tx.wallet; if (tx.to) $('fTo').value = tx.to;
+    $('fDate').value = tx.date; $('fDate2').value = tx.date; $('fNote').value = tx.note || ''; }
 }
 function drawCats(){
-  const list = CATS[form.type] || [];
-  $('cats').innerHTML = list.map(c => `<button class="cat" data-cat="${c[0]}" aria-pressed="${form.cat === c[0]}"><span class="e">${c[1]}</span><span>${c[2]}</span></button>`).join('');
+  const list = cats(form.type);
+  $('cats').innerHTML = list.map(c => `<button class="cat" data-cat="${c[0]}" aria-pressed="${form.cat === c[0]}"><span class="e">${c[1]}</span><span>${esc(c[2])}</span></button>`).join('');
 }
 function setType(t){
   form.type = t; form.cat = t === 'in' ? 'gaji' : 'makan';
@@ -402,7 +451,11 @@ function saveTx(){
   if (!amount) return err('Isi nominal terlebih dahulu.');
   if (!wallet) return err('Tambahkan dompet terlebih dahulu di menu Dompet.');
   if (tr && wallet === to) return err('Dompet asal dan tujuan harus berbeda.');
-  S.txs.push({id:uid(), type:form.type, amount, cat:tr ? '' : form.cat, wallet, to, note:$('fNote').value.trim(), date});
+  const note = $('fNote').value.trim();
+  if (!tr && note.length >= 3) { S.learn = S.learn || {}; S.learn[note.toLowerCase()] = {c:form.cat, n:note, t:form.type}; }
+  const rec = {id:form.id || uid(), type:form.type, amount, cat:tr ? '' : form.cat, wallet, to, note, date};
+  const ix = S.txs.findIndex(t => t.id === form.id);
+  if (ix >= 0) S.txs[ix] = rec; else S.txs.push(rec);
   save(); closeSheet(); render();
 }
 function openTx(id){
@@ -417,24 +470,181 @@ function openTx(id){
         : `<div class="kv"><span>Kategori</span><span>${c[1]} ${esc(c[2])}</span></div><div class="kv"><span>Dompet</span><span>${esc(w ? w.name : '?')}</span></div>`}
       <div class="kv"><span>Tanggal</span><span>${dayLabel(t.date)}</span></div>
     </div>
+    <button class="primary" data-edit="${t.id}">Ubah transaksi</button>
     <button class="danger" data-del="${t.id}">Hapus transaksi</button>`);
 }
-function openWallet(){
-  openSheet(`${head('Tambah dompet')}
-    <div class="field"><label for="wName">Nama</label><input id="wName" placeholder="Contoh: BRI, Saham, Pinjaman Budi" maxlength="30"></div>
-    <div class="field"><label for="wGroup">Kelompok</label><select id="wGroup">${Object.keys(GROUPS).map(g => `<option value="${g}">${GROUPS[g].label} — ${GROUPS[g].desc.toLowerCase()}</option>`).join('')}</select></div>
-    <div class="field"><label for="wInit">Saldo saat ini</label><input id="wInit" inputmode="numeric" placeholder="0" autocomplete="off"></div>
-    <div class="field"><span class="lab">Ikon</span><div class="cats" id="wEmoji">${WALLET_EMOJI.map((e, i) => `<button class="cat" data-emoji="${e}" aria-pressed="${i === 0}"><span class="e">${e}</span></button>`).join('')}</div></div>
+const numOf = id => Number(($(id).value || '').replace(/\D/g, ''));
+function openWallet(id){
+  const w = id ? wal(id) : null, b = w ? bal(w) : 0;
+  openSheet(`${head(w ? 'Ubah dompet' : 'Tambah dompet')}
+    <input id="wId" type="hidden" value="${w ? w.id : ''}">
+    <div class="field"><label for="wName">Nama</label><input id="wName" placeholder="Contoh: BRI, Saham, Pinjaman Budi" maxlength="30" value="${w ? esc(w.name) : ''}"></div>
+    <div class="field"><label for="wGroup">Kelompok</label><select id="wGroup">${Object.keys(GROUPS).map(g => `<option value="${g}"${w && w.group === g ? ' selected' : ''}>${GROUPS[g].label} — ${GROUPS[g].desc.toLowerCase()}</option>`).join('')}</select></div>
+    <div class="two">
+      <div class="field"><label for="wInit">Saldo saat ini</label><input id="wInit" inputmode="numeric" placeholder="0" autocomplete="off" value="${b > 0 ? b.toLocaleString('id-ID') : ''}"></div>
+      <div class="field"><label for="wTarget">Target (opsional)</label><input id="wTarget" inputmode="numeric" placeholder="Tanpa target" autocomplete="off" value="${w && w.target ? w.target.toLocaleString('id-ID') : ''}"></div>
+    </div>
+    <div class="field"><span class="lab">Ikon</span><div class="cats" id="wEmoji">${WALLET_EMOJI.map((e, i) => `<button class="cat" data-emoji="${e}" aria-pressed="${w ? e === w.emoji : i === 0}"><span class="e">${e}</span></button>`).join('')}</div></div>
     <p class="err" id="wErr" hidden></p>
-    <button class="primary" data-act="saveWallet">Simpan dompet</button>`);
+    <button class="primary" data-act="saveWallet">Simpan dompet</button>
+    ${w ? `<button class="danger" data-delwallet="${w.id}">Hapus dompet</button>` : ''}`);
 }
 function saveWallet(){
   const name = $('wName').value.trim();
   if (!name) { $('wErr').textContent = 'Isi nama dompet.'; $('wErr').hidden = false; return; }
-  const em = document.querySelector('#wEmoji [aria-pressed="true"]');
-  S.wallets.push({id:uid(), name, group:$('wGroup').value, emoji:em ? em.dataset.emoji : '🏦', init:Number(($('wInit').value || '').replace(/\D/g, ''))});
+  const em = document.querySelector('#wEmoji [aria-pressed="true"]'), w = wal($('wId').value);
+  const data = {name, group:$('wGroup').value, emoji:em ? em.dataset.emoji : (w ? w.emoji : '🏦'), target:numOf('wTarget')};
+  if (w) { Object.assign(w, data); if ($('wInit').value !== '') w.init += numOf('wInit') - bal(w); }
+  else S.wallets.push({id:uid(), init:numOf('wInit'), ...data});
   save(); closeSheet(); render();
 }
+
+/* ---------- tagihan rutin ---------- */
+function openBills(msg){
+  const bills = S.bills || [];
+  openSheet(`${head('Tagihan rutin')}
+    <p class="hint">Tagihan muncul di Beranda setiap bulan. Ketuk Bayar untuk mencatatnya sebagai pengeluaran hari itu.</p>
+    ${msg ? `<p class="err">${msg}</p>` : ''}
+    ${bills.length ? `<div class="list">${bills.map(b => `<div class="item"><span class="ico">${catOf(b.cat)[1]}</span><span class="mid"><b>${esc(b.name)}</b><span>Tgl ${b.day} · ${rp(b.amount)} · ${esc((wal(b.wallet) || {name:'?'}).name)}</span></span><button class="pay del" data-delbill="${b.id}">Hapus</button></div>`).join('')}</div>` : ''}
+    <h2>Tambah tagihan</h2>
+    <div class="field"><label for="bName">Nama</label><input id="bName" placeholder="Contoh: Listrik, Internet, Cicilan motor" maxlength="30"></div>
+    <div class="two">
+      <div class="field"><label for="bAmount">Nominal</label><input id="bAmount" inputmode="numeric" placeholder="0" autocomplete="off"></div>
+      <div class="field"><label for="bDay">Jatuh tempo tanggal</label><select id="bDay">${Array.from({length:28}, (_, i) => `<option>${i + 1}</option>`).join('')}</select></div>
+      <div class="field"><label for="bCat">Kategori</label><select id="bCat">${cats('out').map(c => `<option value="${c[0]}">${c[1]} ${esc(c[2])}</option>`).join('')}</select></div>
+      <div class="field"><label for="bWallet">Dibayar dari</label><select id="bWallet">${walletOpts()}</select></div>
+    </div>
+    <p class="err" id="bErr" hidden></p>
+    <button class="primary" data-act="saveBill">Simpan tagihan</button>`);
+}
+function saveBill(){
+  const name = $('bName').value.trim(), amount = numOf('bAmount'), wallet = $('bWallet').value;
+  const err = m => { $('bErr').textContent = m; $('bErr').hidden = false; };
+  if (!name) return err('Isi nama tagihan.');
+  if (!amount) return err('Isi nominal tagihan.');
+  if (!wallet) return err('Tambahkan dompet terlebih dahulu di menu Dompet.');
+  S.bills = S.bills || [];
+  S.bills.push({id:uid(), name, amount, cat:$('bCat').value, wallet, day:Number($('bDay').value), paid:{}});
+  save(); render(); openBills();
+}
+function payBill(id){
+  const b = (S.bills || []).find(x => x.id === id); if (!b) return;
+  if (!wal(b.wallet)) return openBills('Dompet untuk tagihan ' + esc(b.name) + ' sudah tidak ada. Hapus tagihannya lalu buat ulang.');
+  S.txs.push({id:uid(), type:'out', amount:b.amount, cat:b.cat, wallet:b.wallet, to:'', note:b.name, date:ago(0)});
+  b.paid = b.paid || {}; b.paid[ago(0).slice(0,7)] = true;
+  save(); render();
+}
+
+/* ---------- anggaran ---------- */
+function openBudgets(){
+  openSheet(`${head('Anggaran bulanan')}
+    <p class="hint">Isi batas pengeluaran per bulan untuk kategori yang ingin dijaga, dan kosongkan sisanya. Yang dihitung hanya uang pribadi.</p>
+    ${cats('out').map(c => `<div class="brow"><label for="bg-${c[0]}">${c[1]} ${esc(c[2])}</label><input id="bg-${c[0]}" data-budget="${c[0]}" inputmode="numeric" placeholder="Tanpa batas" autocomplete="off" value="${(S.budgets || {})[c[0]] ? S.budgets[c[0]].toLocaleString('id-ID') : ''}"></div>`).join('')}
+    <button class="primary" data-act="saveBudgets">Simpan anggaran</button>`);
+}
+function saveBudgets(){
+  S.budgets = {};
+  document.querySelectorAll('[data-budget]').forEach(i => { const n = Number(i.value.replace(/\D/g, '')); if (n) S.budgets[i.dataset.budget] = n; });
+  save(); closeSheet(); render();
+}
+
+/* ---------- kategori sendiri ---------- */
+const CAT_EMOJI = ['🍰','🍔','🐶','🐱','👶','🎓','🏋️','✈️','🏠','🚗','👕','💄','🎮','📚','🧾','🕌','💝','🧺','🔧','📱','🍼','💇','🏖️','💰','🧧','🛍️','🎵','🚬','🐟','🌿'];
+function openCats(){
+  const mine = t => ((S.cats && S.cats[t]) || []);
+  const rows = t => mine(t).map(c => `<div class="item"><span class="ico">${c[1]}</span><span class="mid"><b>${esc(c[2])}</b><span>${t === 'out' ? 'Pengeluaran' : 'Pemasukan'}</span></span><button class="pay del" data-delcat="${c[0]}">Hapus</button></div>`).join('');
+  openSheet(`${head('Kategori sendiri')}
+    ${mine('out').length + mine('in').length ? `<div class="list">${rows('out')}${rows('in')}</div>` : '<p class="hint">Belum ada kategori buatan sendiri.</p>'}
+    <h2>Tambah kategori</h2>
+    <div class="two">
+      <div class="field"><label for="cName">Nama</label><input id="cName" placeholder="Contoh: Anak, Sedekah" maxlength="16"></div>
+      <div class="field"><label for="cType">Jenis</label><select id="cType"><option value="out">Pengeluaran</option><option value="in">Pemasukan</option></select></div>
+    </div>
+    <div class="field"><span class="lab">Ikon</span><div class="cats emo" id="cEmoji">${CAT_EMOJI.map((e, i) => `<button class="cat" data-pick="${e}" aria-pressed="${i === 0}"><span class="e">${e}</span></button>`).join('')}</div></div>
+    <p class="err" id="cErr" hidden></p>
+    <button class="primary" data-act="saveCat">Simpan kategori</button>`);
+}
+function saveCat(){
+  const name = $('cName').value.trim();
+  if (!name) { $('cErr').textContent = 'Isi nama kategori.'; $('cErr').hidden = false; return; }
+  const em = document.querySelector('#cEmoji [aria-pressed="true"]'), t = $('cType').value;
+  S.cats = S.cats || {}; S.cats[t] = S.cats[t] || [];
+  S.cats[t].push(['c' + uid(), em ? em.dataset.pick : '📦', name]);
+  save(); render(); openCats();
+}
+
+/* ---------- baca screenshot dan teks notifikasi ---------- */
+const MONTHS = {jan:1,feb:2,mar:3,apr:4,mei:5,may:5,jun:6,jul:7,agu:8,agt:8,aug:8,sep:9,okt:10,oct:10,nov:11,des:12,dec:12};
+const HINTS = [
+  [/pertamina|shell|spbu|bensin|pertalite|pertamax/i, 'bensin'],
+  [/\bpln\b|listrik|token/i, 'listrik'],
+  [/indihome|telkom|wifi|internet|biznet|first media|myrepublic/i, 'internet'],
+  [/apotek|apotik|klinik|rumah sakit|dokter|halodoc|kimia farma/i, 'berobat'],
+  [/kopi|coffee|starbucks|kenangan|janji jiwa/i, 'kopi'],
+  [/gofood|grabfood|shopeefood|resto|warung|makan|bakso|\bnasi\b|ayam|mcd|kfc/i, 'makan'],
+  [/indomaret|alfamart|alfamidi|superindo|hypermart|tokopedia|shopee|lazada|blibli/i, 'belanja'],
+  [/gojek|gocar|goride|grab|parkir|\btol\b|kereta|\bkai\b|transjakarta|\bmrt\b/i, 'transport'],
+  [/netflix|spotify|bioskop|cgv|xxi|youtube|disney/i, 'hiburan']
+];
+const toNum = s => Number(s.replace(/[.,]\d{2}$/, '').replace(/\D/g, '')) || 0;
+function parseDate(text){
+  const ok = (y, m, d) => { y = Number(y); m = Number(m); d = Number(d); if (y < 100) y += 2000;
+    if (!(m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 2000)) return '';
+    const s = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'); return s > ago(0) ? '' : s; };
+  let m = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/); if (m) return ok(m[1], m[2], m[3]);
+  m = text.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4}|\d{2})\b/); if (m) return ok(m[3], m[2], m[1]);
+  m = text.match(/\b(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})\b/);
+  if (m && MONTHS[m[2].slice(0, 3).toLowerCase()]) return ok(m[3], MONTHS[m[2].slice(0, 3).toLowerCase()], m[1]);
+  return '';
+}
+function parseText(text){
+  const top = [], mid = [], low = [];
+  text.split(/\n+/).forEach(line => { const re = /(?:Rp\.?|IDR)\s*(\d[\d.,]*)/gi; let m;
+    while ((m = re.exec(line))) { const n = toNum(m[1]); if (n < 100) continue;
+      (/saldo|balance|admin|biaya|fee|limit/i.test(line) ? low : /total|nominal|jumlah|amount|bayar|sebesar|senilai/i.test(line) ? top : mid).push(n); } });
+  let amounts = [...top, ...mid, ...low];
+  if (!amounts.length) { const re = /\b\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{2})?\b/g; let m;
+    while ((m = re.exec(text))) { const n = toNum(m[0]); if (n >= 100) amounts.push(n); } }
+  amounts = [...new Set(amounts)].slice(0, 6);
+  const lower = text.toLowerCase();
+  let type = /\bmasuk\b|diterima|menerima|received|incoming/i.test(text) ? 'in' : 'out';
+  const w = S.wallets.find(x => x.name.length >= 3 && lower.includes(x.name.toLowerCase()));
+  let cat = '', note = '';
+  const known = Object.keys(S.learn || {}).find(k => lower.includes(k));
+  if (known) { cat = S.learn[known].c; note = S.learn[known].n; type = S.learn[known].t || type; }
+  else if (type === 'in') cat = /gaji|salary|payroll/i.test(text) ? 'gaji' : 'lain-in';
+  else { const h = HINTS.find(x => x[0].test(text));
+    if (h) { cat = h[1]; const k = text.match(h[0])[0]; note = k[0].toUpperCase() + k.slice(1).toLowerCase(); } }
+  const to = text.match(/(?:penerima|kepada|merchant|tujuan|nama toko|(?:transfer|bayar|pembayaran|dibayar) ke)\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 .&'-]{2,28})/i);
+  if (to && !known) note = to[1].trim();
+  return {amounts, type, date:parseDate(text), wallet:w ? w.id : '', cat, note};
+}
+function applyScan(p){
+  const box = $('scan'); if (!box) return;
+  box.hidden = false;
+  if (!p.amounts.length) { box.innerHTML = '<span>Tidak ada nominal yang terbaca. Isi sendiri di bawah.</span>'; return; }
+  setType(p.type);
+  if (p.cat) { form.cat = p.cat; drawCats(); }
+  $('fAmount').value = p.amounts[0].toLocaleString('id-ID');
+  if (p.date) { $('fDate').value = p.date; $('fDate2').value = p.date; }
+  if (p.wallet) $('fWallet').value = p.wallet;
+  if (p.note) $('fNote').value = p.note.slice(0, 60);
+  box.innerHTML = `<span>Sudah terisi otomatis. Periksa dulu sebelum disimpan.${p.amounts.length > 1 ? ' Kalau nominalnya salah, pilih yang benar:' : ''}</span>`
+    + (p.amounts.length > 1 ? `<div class="chips">${p.amounts.map((n, i) => `<button class="chip num" data-amt="${n}" aria-pressed="${i === 0}">${rp(n)}</button>`).join('')}</div>` : '');
+}
+function loadOcr(){
+  return window.Tesseract ? Promise.resolve() : new Promise((ok, no) => { const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
+}
+async function readShot(file){
+  const say = t => { const b = $('scan'); if (b) { b.hidden = false; b.innerHTML = `<span>${t}</span>`; } };
+  say('Membaca gambar… tunggu sebentar.');
+  try { await loadOcr();
+    const r = await Tesseract.recognize(file, 'eng', {logger: m => { if (m.status === 'recognizing text') say('Membaca gambar… ' + Math.round(m.progress * 100) + '%'); }});
+    applyScan(parseText(r.data.text)); }
+  catch(err) { say('Gambar tidak bisa dibaca. Periksa koneksi internet lalu coba lagi, atau isi sendiri di bawah.'); }
+}
+
 /* ---------- PIN ---------- */
 let lock = {mode:null, buf:'', first:'', msg:'', busy:false};
 const LOCK_TITLE = {unlock:'Masukkan PIN', set1:'Buat PIN 6 angka', set2:'Ulangi PIN baru', off:'Masukkan PIN untuk mematikan', change:'Masukkan PIN lama'};
@@ -473,13 +683,16 @@ async function pressKey(k){
   lock.buf = ''; lock.busy = false; drawLock();
 }
 function openSecurity(){
-  openSheet(`${head('Keamanan')}
+  openSheet(`${head('Pengaturan')}
+    <h2>Kunci PIN</h2>
     <div class="kv"><span>PIN aplikasi</span><span><b>${S.pin ? 'Aktif' : 'Belum dipasang'}</b></span></div>
     <p class="hint">PIN diminta setiap aplikasi dibuka, dan setelah ditinggalkan lebih dari satu menit. Kalau PIN terlupa, satu-satunya jalan adalah menghapus semua data.</p>
     ${S.pin ? `<button class="primary" data-act="locknow">Kunci sekarang</button>
       <button class="ghost" data-act="changepin">Ganti PIN</button>
       <button class="danger" data-act="offpin">Matikan PIN</button>`
     : '<button class="primary" data-act="setpin">Pasang PIN</button>'}
+    <h2 style="margin-top:8px">Kategori</h2>
+    <button class="ghost" data-act="cats">Kelola kategori sendiri</button>
     <h2 style="margin-top:8px">Cadangan data</h2>
     <p class="hint">Data hanya tersimpan di HP ini. Simpan cadangan secara berkala ke Files, iCloud, atau Google Drive supaya tidak hilang kalau HP rusak atau berganti.</p>
     <button class="ghost" data-act="export">Simpan cadangan</button>
@@ -521,12 +734,13 @@ document.addEventListener('visibilitychange', () => {
 
 const dots = el => { const n = el.value.replace(/\D/g, ''); el.value = n ? Number(n).toLocaleString('id-ID') : ''; };
 
-document.addEventListener('input', e => { if (e.target.id === 'fAmount' || e.target.id === 'wInit') dots(e.target); });
+document.addEventListener('input', e => {
+  if (e.target.getAttribute('inputmode') === 'numeric') dots(e.target);
+  if (e.target.id === 'q') { search = e.target.value; $('txList').innerHTML = txListHtml(); }
+});
 document.addEventListener('change', e => {
   if (e.target.id !== 'fShot' || !e.target.files[0]) return;
-  const r = new FileReader();
-  r.onload = () => { $('shot').innerHTML = `<img src="${r.result}" alt="Screenshot terlampir"><span>Gambar terlampir. Pembacaan otomatis belum aktif, jadi isi nominalnya sendiri.</span>`; $('shot').hidden = false; };
-  r.readAsDataURL(e.target.files[0]);
+  const f = e.target.files[0]; e.target.value = ''; readShot(f);
 });
 document.addEventListener('click', e => {
   if (e.target === $('shade')) return closeSheet();
@@ -534,6 +748,9 @@ document.addEventListener('click', e => {
   const d = b.dataset;
   if (d.key) return pressKey(d.key);
   if (d.act === 'hide') { S.hide = !S.hide; save(); return render(); }
+  if (d.amt) { $('fAmount').value = Number(d.amt).toLocaleString('id-ID'); document.querySelectorAll('#scan .chip').forEach(x => x.setAttribute('aria-pressed', x === b)); return; }
+  if (d.act === 'paste') { $('pasteBox').hidden = !$('pasteBox').hidden; if (!$('pasteBox').hidden) $('fPaste').focus(); return; }
+  if (d.act === 'readPaste') { const t = $('fPaste').value.trim(); if (t) { applyScan(parseText(t)); $('pasteBox').hidden = true; } return; }
   if (d.act === 'security') return openSecurity();
   if (d.act === 'export') return exportData();
   if (d.act === 'doimport') { if (pendingImport) { S = {...pendingImport, pin:S.pin}; pendingImport = null; save(); } closeSheet(); return render(); }
@@ -556,6 +773,22 @@ document.addEventListener('click', e => {
     else { b.dataset.sure = '1'; b.textContent = 'Ketuk sekali lagi untuk menghapus'; } return; }
   if (d.act === 'add') return openAdd();
   if (d.act === 'wallet') return openWallet();
+  if (d.wallet) return openWallet(d.wallet);
+  if (d.edit) return openAdd(S.txs.find(t => t.id === d.edit));
+  if (d.delwallet) { if (b.dataset.sure) { const id = d.delwallet;
+      S.wallets = S.wallets.filter(w => w.id !== id); S.txs = S.txs.filter(t => t.wallet !== id && t.to !== id);
+      S.bills = (S.bills || []).filter(x => x.wallet !== id); save(); closeSheet(); render(); }
+    else { b.dataset.sure = '1'; b.textContent = 'Ketuk lagi: hapus dompet beserta transaksinya'; } return; }
+  if (d.pay) return payBill(d.pay);
+  if (d.delbill) { S.bills = (S.bills || []).filter(x => x.id !== d.delbill); save(); render(); return openBills(); }
+  if (d.delcat) { ['out','in'].forEach(t => { if (S.cats && S.cats[t]) S.cats[t] = S.cats[t].filter(c => c[0] !== d.delcat); }); save(); render(); return openCats(); }
+  if (d.pick) { document.querySelectorAll('#cEmoji .cat').forEach(x => x.setAttribute('aria-pressed', x === b)); return; }
+  if (d.act === 'bills') return openBills();
+  if (d.act === 'saveBill') return saveBill();
+  if (d.act === 'budgets') return openBudgets();
+  if (d.act === 'saveBudgets') return saveBudgets();
+  if (d.act === 'cats') return openCats();
+  if (d.act === 'saveCat') return saveCat();
   if (d.act === 'save') return saveTx();
   if (d.act === 'saveWallet') return saveWallet();
   if (d.act === 'close') return closeSheet();
