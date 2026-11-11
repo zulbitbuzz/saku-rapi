@@ -156,6 +156,9 @@ h2{font-family:var(--display);font-size:16px;font-weight:700;margin:0;text-wrap:
 .cats.emo .cat{padding:8px 2px}
 .fill{display:block}
 .edit-ic{color:var(--muted);font-size:15px;flex:none}
+.hero-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.hero-tog{background:var(--hero-soft);color:var(--hero-ink);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;white-space:nowrap}
+.item .mid span.wrap{white-space:normal;color:var(--accent);font-weight:500}
 .top-btns{display:flex;gap:8px}
 .icon-btn{width:40px;height:40px;border-radius:12px;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center}
 .icon-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -218,11 +221,12 @@ const GROUPS = {
 const CATS = {
   out:[['makan','🍜','Makan'],['bensin','⛽','Bensin'],['pribadi','🧴','Pribadi'],['listrik','💡','Listrik'],
        ['internet','📶','Internet'],['berobat','💊','Berobat'],['belanja','🛒','Belanja'],['transport','🛵','Transport'],
-       ['hiburan','🎬','Hiburan'],['kopi','☕','Kopi'],['hadiah','🎁','Hadiah'],['lain','📦','Lainnya']],
-  in:[['gaji','💼','Gaji'],['bonus','🎉','Bonus'],['hasil','🌱','Hasil investasi'],['setoran','📥','Setoran kas'],['lain-in','🪙','Lainnya']]
+       ['hiburan','🎬','Hiburan'],['kopi','☕','Kopi'],['hadiah','🎁','Hadiah'],['piutang','🤝','Piutang'],['lain','📦','Lainnya']],
+  in:[['gaji','💼','Gaji'],['bonus','🎉','Bonus'],['hasil','🌱','Hasil investasi'],['setoran','📥','Setoran kas'],['bayar','🤝','Bayar hutang'],['lain-in','🪙','Lainnya']]
 };
 const WALLET_EMOJI = ['🏦','🏛️','💵','📱','💳','🗄️','📈','🪙','🏠','🤝','🐷','💼'];
 const cats = t => [...(CATS[t] || []), ...((S.cats && S.cats[t]) || [])];
+const spendCats = () => cats('out').filter(c => c[0] !== 'piutang');
 const catOf = id => [...cats('out'), ...cats('in')].find(c => c[0] === id) || ['', '📦', 'Lainnya'];
 
 const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
@@ -268,12 +272,24 @@ const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch
 
 const sal = n => S.hide ? 'Rp ••••••' : rp(n);
 const wal = id => S.wallets.find(w => w.id === id);
-const bal = w => S.txs.reduce((s, t) => {
+const flowOf = w => S.txs.reduce((s, t) => {
   if (t.type === 'in' && t.wallet === w.id) return s + t.amount;
   if (t.type === 'out' && t.wallet === w.id) return s - t.amount;
   if (t.type === 'transfer') { if (t.wallet === w.id) s -= t.amount; if (t.to === w.id) s += t.amount; }
-  return s; }, w.init);
+  return s; }, 0);
+/* Kalau uang kas disimpan di dompet ini (kasIn), transaksi kas ikut mengubah saldo aslinya. */
+const bal = w => w.init + flowOf(w) + (wal(w.kasIn) ? flowOf(wal(w.kasIn)) : 0);
 const groupTotal = g => S.wallets.filter(w => w.group === g).reduce((s, w) => s + bal(w), 0);
+const kasHeld = w => wal(w.kasIn) ? bal(wal(w.kasIn)) : 0;
+const kasHosts = () => S.wallets.filter(w => w.group === 'pribadi' && wal(w.kasIn));
+const kasTotal = () => kasHosts().reduce((s, w) => s + kasHeld(w), 0);
+const showBal = w => bal(w) - (S.netKas ? kasHeld(w) : 0);
+const pribadiTotal = () => groupTotal('pribadi') - (S.netKas ? kasTotal() : 0);
+function setKas(w, id){
+  if (wal(w.kasIn)) w.init += flowOf(wal(w.kasIn));
+  delete w.kasIn;
+  if (id && wal(id)) { S.wallets.forEach(x => { if (x !== w && x.kasIn === id) setKas(x, ''); }); w.kasIn = id; w.init -= flowOf(wal(id)); }
+}
 const inGroup = (t, g) => { const a = wal(t.wallet), b = wal(t.to); return (a && a.group === g) || (b && b.group === g); };
 const flow = (g, ym) => { let i = 0, o = 0;
   S.txs.forEach(t => { const w = wal(t.wallet); if (!w || w.group !== g || t.date.slice(0,7) !== ym) return;
@@ -288,7 +304,7 @@ const $ = id => document.getElementById(id);
 function txRow(t){
   const w = wal(t.wallet), c = catOf(t.cat);
   if (t.type === 'transfer'){ const to = wal(t.to);
-    return `<button class="item" data-tx="${t.id}"><span class="ico">🔁</span><span class="mid"><b>${esc(t.note || 'Pindah dana')}</b><span>${esc(w ? w.name : '?')} → ${esc(to ? to.name : '?')}</span></span><span class="amt tr num">${rp(t.amount)}</span></button>`; }
+    return `<button class="item" data-tx="${t.id}"><span class="ico">${t.debt ? '🤝' : '🔁'}</span><span class="mid"><b>${esc(t.note || 'Pindah dana')}</b><span>${esc(w ? w.name : '?')} → ${esc(to ? to.name : '?')}</span></span><span class="amt tr num">${rp(t.amount)}</span></button>`; }
   return `<button class="item" data-tx="${t.id}"><span class="ico">${c[1]}</span><span class="mid"><b>${esc(t.note || c[2])}</b><span>${esc(c[2])} · ${esc(w ? w.name : '?')}</span></span><span class="amt ${t.type} num">${t.type === 'in' ? '+' : '−'}${rp(t.amount)}</span></button>`;
 }
 const dayLabel = d => { if (d === ago(0)) return 'Hari ini'; if (d === ago(1)) return 'Kemarin';
@@ -309,7 +325,11 @@ function renderBeranda(){
   const recent = sorted().slice(0, 5), bills = billsNow(), warn = budgetRows(ym).filter(r => r.pct >= 80);
   return `
   <section class="hero">
-    <div><div class="lbl">Saldo pribadi</div><div class="big num">${sal(groupTotal('pribadi'))}</div></div>
+    <div>
+      <div class="hero-top"><div class="lbl">Saldo pribadi</div>${kasHosts().length ? `<button class="hero-tog" data-netkas="${S.netKas ? 0 : 1}">${S.netKas ? 'Tampilkan dengan kas' : 'Kurangi uang kas'}</button>` : ''}</div>
+      <div class="big num">${sal(pribadiTotal())}</div>
+      ${kasHosts().length ? `<div class="lbl num">${S.netKas ? 'Sudah dikurangi' : 'Termasuk'} uang kas ${sal(kasTotal())}</div>` : ''}
+    </div>
     <div class="row">
       <div class="mini"><span>Masuk bulan ini</span><b class="num">${sal(f.i)}</b></div>
       <div class="mini"><span>Keluar bulan ini</span><b class="num">${sal(f.o)}</b></div>
@@ -350,12 +370,13 @@ const ADD_LABEL = {pribadi:'dompet pribadi', kantor:'kas kantor', investasi:'inv
 function renderDompet(){
   let html = '';
   Object.keys(GROUPS).forEach(g => { const ws = S.wallets.filter(w => w.group === g);
-    html += `<section class="sec"><div class="sec-head"><h2>${GROUPS[g].emoji} ${GROUPS[g].label}</h2><span class="group-total num">${sal(groupTotal(g))}</span></div>
+    html += `<section class="sec"><div class="sec-head"><h2>${GROUPS[g].emoji} ${GROUPS[g].label}</h2><span class="group-total num">${sal(g === 'pribadi' ? pribadiTotal() : groupTotal(g))}</span></div>
     <div class="list">${ws.length ? ws.map(w => { const pct = w.target ? Math.round(bal(w) / w.target * 100) : 0;
-      return `<button class="item" data-wallet="${w.id}"><span class="ico">${esc(w.emoji)}</span><span class="mid"><b>${esc(w.name)}</b><span>${w.target ? `Target ${sal(w.target)} · ${pct}%` : GROUPS[g].desc}</span>${w.target ? `<span class="track"><span class="fill" style="width:${Math.min(100, Math.max(0, pct))}%"></span></span>` : ''}</span><span class="amt num">${sal(bal(w))}</span><span class="edit-ic" aria-hidden="true">✎</span></button>`; }).join('')
+      return `<button class="item" data-wallet="${w.id}"><span class="ico">${esc(w.emoji)}</span><span class="mid"><b>${esc(w.name)}</b>${wal(w.kasIn) ? `<span class="wrap num">${S.netKas ? 'Sudah dikurangi' : 'Termasuk'} kas ${sal(kasHeld(w))}</span>` : ''}<span>${w.target ? `Target ${sal(w.target)} · ${pct}%` : g === 'piutang' && bal(w) <= 0 ? 'Lunas' : GROUPS[g].desc}</span>${w.target ? `<span class="track"><span class="fill" style="width:${Math.min(100, Math.max(0, pct))}%"></span></span>` : ''}</span><span class="amt num">${sal(showBal(w))}</span><span class="edit-ic" aria-hidden="true">✎</span></button>`; }).join('')
       : `<div class="empty">Belum ada ${ADD_LABEL[g]}.</div>`}</div>
     <button class="ghost" data-addwallet="${g}">+ Tambah ${ADD_LABEL[g]}</button></section>`; });
-  return '<p class="hint">Ketuk baris mana pun (tanda ✎) untuk mengubah nama atau saldonya.</p>' + html;
+  const tog = kasHosts().length ? `<div class="chips"><button class="chip" data-netkas="0" aria-pressed="${!S.netKas}">Termasuk uang kas</button><button class="chip" data-netkas="1" aria-pressed="${!!S.netKas}">Dikurangi uang kas</button></div>` : '';
+  return tog + '<p class="hint">Ketuk baris mana pun (tanda ✎) untuk mengubah nama atau saldonya.</p>' + html;
 }
 function renderLaporan(){
   const f = flow(repGroup, repYm), by = {};
@@ -420,6 +441,7 @@ function openAdd(tx){
     </div>
     <div class="amount"><span>Rp</span><input id="fAmount" inputmode="numeric" placeholder="0" autocomplete="off" aria-label="Nominal"></div>
     <div class="field" id="catField"><span class="lab">Kategori</span><div class="cats" id="cats"></div></div>
+    <div class="field" id="debtField" hidden><label for="fDebt" id="debtLab">Dipinjamkan ke</label><select id="fDebt"></select><input id="fDebtNew" placeholder="Nama orang yang meminjam" maxlength="30" hidden></div>
     <div class="two">
       <div class="field"><label for="fWallet" id="walletLab">Dari dompet</label><select id="fWallet">${walletOpts()}</select></div>
       <div class="field" id="toField" hidden><label for="fTo">Ke dompet</label><select id="fTo">${walletOpts(S.wallets[1] && S.wallets[1].id)}</select></div>
@@ -430,13 +452,35 @@ function openAdd(tx){
     <p class="err" id="fErr" hidden></p>
     <button class="primary" data-act="save">Simpan</button>`);
   drawCats();
+  if (tx && tx.debt) return fillDebt(tx);
   if (tx) { setType(tx.type); if (tx.type !== 'transfer') { form.cat = tx.cat; drawCats(); }
     $('fAmount').value = tx.amount.toLocaleString('id-ID'); $('fWallet').value = tx.wallet; if (tx.to) $('fTo').value = tx.to;
     $('fDate').value = tx.date; $('fDate2').value = tx.date; $('fNote').value = tx.note || ''; }
 }
+function fillDebt(tx){
+  const lend = tx.debt === 'lend';
+  setType(lend ? 'out' : 'in'); form.cat = lend ? 'piutang' : 'bayar'; form.debtId = lend ? tx.to : tx.wallet; drawCats();
+  $('fDebt').value = form.debtId; drawDebtName();
+  $('fAmount').value = tx.amount.toLocaleString('id-ID'); $('fWallet').value = lend ? tx.wallet : tx.to;
+  $('fDate').value = tx.date; $('fDate2').value = tx.date; $('fNote').value = tx.note || '';
+}
+const drawDebtName = () => { $('fDebtNew').hidden = $('fDebt').value !== '__new'; };
+function drawDebt(){
+  const on = form.type !== 'transfer' && (form.cat === 'piutang' || form.cat === 'bayar');
+  $('debtField').hidden = !on; if (!on) return;
+  const lend = form.cat === 'piutang', cur = $('fDebt').value;
+  const ws = S.wallets.filter(w => w.group === 'piutang' && (lend || bal(w) > 0 || w.id === form.debtId));
+  $('debtLab').textContent = lend ? 'Dipinjamkan ke' : 'Siapa yang membayar';
+  $('fDebt').innerHTML = (!lend && !ws.length ? '<option value="">Belum ada yang berhutang</option>' : '')
+    + ws.map(w => `<option value="${w.id}">${esc(w.name)} — sisa ${sal(bal(w))}</option>`).join('')
+    + (lend ? '<option value="__new">+ Orang baru</option>' : '');
+  if ([...$('fDebt').options].some(o => o.value === cur)) $('fDebt').value = cur;
+  drawDebtName();
+}
 function drawCats(){
   const list = cats(form.type);
   $('cats').innerHTML = list.map(c => `<button class="cat" data-cat="${c[0]}" aria-pressed="${form.cat === c[0]}"><span class="e">${c[1]}</span><span>${esc(c[2])}</span></button>`).join('');
+  drawDebt();
 }
 function setType(t){
   form.type = t; form.cat = t === 'in' ? 'gaji' : 'makan';
@@ -444,7 +488,25 @@ function setType(t){
   const tr = t === 'transfer';
   $('catField').hidden = tr; $('toField').hidden = !tr; $('dateField').hidden = tr; $('dateField2').hidden = !tr;
   $('walletLab').textContent = t === 'in' ? 'Masuk ke dompet' : 'Dari dompet';
-  if (!tr) drawCats();
+  if (!tr) drawCats(); else drawDebt();
+}
+function saveDebt(amount, wallet, note, date, err){
+  const lend = form.cat === 'piutang';
+  if (wal(wallet).group === 'piutang') return err('Pilih dompet uang Anda, bukan dompet piutang.');
+  let id = $('fDebt').value;
+  if (id === '__new') { const name = $('fDebtNew').value.trim();
+    if (!name) return err('Isi nama orang yang meminjam.');
+    const same = S.wallets.find(w => w.group === 'piutang' && w.name.toLowerCase() === name.toLowerCase());
+    if (same) id = same.id; else { id = uid(); S.wallets.push({id, name, group:'piutang', emoji:'🤝', init:0, target:0}); } }
+  const p = wal(id);
+  if (!p) return err(lend ? 'Pilih orang yang meminjam.' : 'Belum ada yang berhutang. Catat piutangnya dulu.');
+  const old = S.txs.find(t => t.id === form.id);
+  if (!lend) { const owed = bal(p) + (old && old.debt === 'repay' && old.wallet === id ? old.amount : 0) - (old && old.debt === 'lend' && old.to === id ? old.amount : 0);
+    if (amount > owed) return err('Melebihi sisa hutang ' + p.name + ': ' + rp(owed) + '.'); }
+  const rec = {id:form.id || uid(), type:'transfer', debt:lend ? 'lend' : 'repay', amount, cat:'', wallet:lend ? wallet : id, to:lend ? id : wallet, note:note || (lend ? 'Pinjaman ke ' : 'Bayar hutang ') + p.name, date};
+  const ix = S.txs.findIndex(t => t.id === form.id);
+  if (ix >= 0) S.txs[ix] = rec; else S.txs.push(rec);
+  save(); closeSheet(); render();
 }
 function saveTx(){
   const amount = Number(($('fAmount').value || '').replace(/\D/g, ''));
@@ -455,6 +517,7 @@ function saveTx(){
   if (!wallet) return err('Tambahkan dompet terlebih dahulu di menu Dompet.');
   if (tr && wallet === to) return err('Dompet asal dan tujuan harus berbeda.');
   const note = $('fNote').value.trim();
+  if (!tr && (form.cat === 'piutang' || form.cat === 'bayar')) return saveDebt(amount, wallet, note, date, err);
   if (!tr && note.length >= 3) { S.learn = S.learn || {}; S.learn[note.toLowerCase()] = {c:form.cat, n:note, t:form.type}; }
   const rec = {id:form.id || uid(), type:form.type, amount, cat:tr ? '' : form.cat, wallet, to, note, date};
   const ix = S.txs.findIndex(t => t.id === form.id);
@@ -464,7 +527,7 @@ function saveTx(){
 function openTx(id){
   const t = S.txs.find(x => x.id === id); if (!t) return;
   const w = wal(t.wallet), to = wal(t.to), c = catOf(t.cat);
-  const kind = {out:'Pengeluaran', in:'Pemasukan', transfer:'Pindah dana'}[t.type];
+  const kind = t.debt ? (t.debt === 'lend' ? 'Piutang' : 'Bayar hutang') : {out:'Pengeluaran', in:'Pemasukan', transfer:'Pindah dana'}[t.type];
   openSheet(`${head(esc(t.note || (t.type === 'transfer' ? 'Pindah dana' : c[2])))}
     <div>
       <div class="kv"><span>Jenis</span><span>${kind}</span></div>
@@ -488,6 +551,7 @@ function openWallet(id, group){
       <div class="field"><label for="wInit">${isP ? 'Jumlah piutang' : 'Saldo saat ini'}</label><input id="wInit" inputmode="numeric" placeholder="0" autocomplete="off" value="${b > 0 ? b.toLocaleString('id-ID') : ''}"></div>
       <div class="field"><label for="wTarget">Target (opsional)</label><input id="wTarget" inputmode="numeric" placeholder="Tanpa target" autocomplete="off" value="${w && w.target ? w.target.toLocaleString('id-ID') : ''}"></div>
     </div>
+    ${grp === 'pribadi' && S.wallets.some(x => x.group === 'kantor') ? `<div class="field"><label for="wKas">Uang kas kantor yang disimpan di sini</label><select id="wKas"><option value="">Tidak ada</option>${S.wallets.filter(x => x.group === 'kantor').map(x => `<option value="${x.id}"${w && w.kasIn === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select><p class="hint">Pilih ini kalau uang kas tercampur di rekening ini. Isi saldo di atas sesuai saldo asli di aplikasi bank.</p></div>` : ''}
     <div class="field"><span class="lab">Ikon</span><div class="cats" id="wEmoji">${WALLET_EMOJI.map((e, i) => `<button class="cat" data-emoji="${e}" aria-pressed="${w ? e === w.emoji : i === 0}"><span class="e">${e}</span></button>`).join('')}</div></div>
     <p class="err" id="wErr" hidden></p>
     <button class="primary" data-act="saveWallet">Simpan dompet</button>
@@ -500,6 +564,9 @@ function saveWallet(){
   const data = {name, group:$('wGroup').value, emoji:em ? em.dataset.emoji : (w ? w.emoji : '🏦'), target:numOf('wTarget')};
   if (w) { Object.assign(w, data); if ($('wInit').value !== '') w.init += numOf('wInit') - bal(w); }
   else S.wallets.push({id:uid(), init:numOf('wInit'), ...data});
+  const cur = w || S.wallets[S.wallets.length - 1], next = data.group === 'pribadi' && $('wKas') ? $('wKas').value : '';
+  if (next !== (cur.kasIn || '')) setKas(cur, next);
+  if (data.group !== 'kantor') S.wallets.forEach(x => { if (x.kasIn === cur.id) setKas(x, ''); });
   save(); closeSheet(); render();
 }
 
@@ -515,7 +582,7 @@ function openBills(msg){
     <div class="two">
       <div class="field"><label for="bAmount">Nominal</label><input id="bAmount" inputmode="numeric" placeholder="0" autocomplete="off"></div>
       <div class="field"><label for="bDay">Jatuh tempo tanggal</label><select id="bDay">${Array.from({length:28}, (_, i) => `<option>${i + 1}</option>`).join('')}</select></div>
-      <div class="field"><label for="bCat">Kategori</label><select id="bCat">${cats('out').map(c => `<option value="${c[0]}">${c[1]} ${esc(c[2])}</option>`).join('')}</select></div>
+      <div class="field"><label for="bCat">Kategori</label><select id="bCat">${spendCats().map(c => `<option value="${c[0]}">${c[1]} ${esc(c[2])}</option>`).join('')}</select></div>
       <div class="field"><label for="bWallet">Dibayar dari</label><select id="bWallet">${walletOpts()}</select></div>
     </div>
     <p class="err" id="bErr" hidden></p>
@@ -543,7 +610,7 @@ function payBill(id){
 function openBudgets(){
   openSheet(`${head('Anggaran bulanan')}
     <p class="hint">Isi batas pengeluaran per bulan untuk kategori yang ingin dijaga, dan kosongkan sisanya. Yang dihitung hanya uang pribadi.</p>
-    ${cats('out').map(c => `<div class="brow"><label for="bg-${c[0]}">${c[1]} ${esc(c[2])}</label><input id="bg-${c[0]}" data-budget="${c[0]}" inputmode="numeric" placeholder="Tanpa batas" autocomplete="off" value="${(S.budgets || {})[c[0]] ? S.budgets[c[0]].toLocaleString('id-ID') : ''}"></div>`).join('')}
+    ${spendCats().map(c => `<div class="brow"><label for="bg-${c[0]}">${c[1]} ${esc(c[2])}</label><input id="bg-${c[0]}" data-budget="${c[0]}" inputmode="numeric" placeholder="Tanpa batas" autocomplete="off" value="${(S.budgets || {})[c[0]] ? S.budgets[c[0]].toLocaleString('id-ID') : ''}"></div>`).join('')}
     <button class="primary" data-act="saveBudgets">Simpan anggaran</button>`);
 }
 function saveBudgets(){
@@ -738,6 +805,7 @@ document.addEventListener('visibilitychange', () => {
 
 const dots = el => { const n = el.value.replace(/\D/g, ''); el.value = n ? Number(n).toLocaleString('id-ID') : ''; };
 
+document.addEventListener('change', e => { if (e.target.id === 'fDebt') drawDebtName(); });
 document.addEventListener('input', e => {
   if (e.target.getAttribute('inputmode') === 'numeric') dots(e.target);
   if (e.target.id === 'q') { search = e.target.value; $('txList').innerHTML = txListHtml(); }
@@ -777,10 +845,14 @@ document.addEventListener('click', e => {
     else { b.dataset.sure = '1'; b.textContent = 'Ketuk sekali lagi untuk menghapus'; } return; }
   if (d.act === 'add') return openAdd();
   if (d.addwallet) return openWallet(null, d.addwallet);
+  if (d.netkas) { S.netKas = d.netkas === '1'; save(); return render(); }
   if (d.wallet) return openWallet(d.wallet);
   if (d.edit) return openAdd(S.txs.find(t => t.id === d.edit));
   if (d.delwallet) { if (b.dataset.sure) { const id = d.delwallet;
+      S.wallets.forEach(x => { if (x.kasIn === id) setKas(x, ''); });
+      const keep = S.wallets.filter(x => x.id !== id).map(x => [x, bal(x)]);
       S.wallets = S.wallets.filter(w => w.id !== id); S.txs = S.txs.filter(t => t.wallet !== id && t.to !== id);
+      keep.forEach(([x, v]) => { x.init += v - bal(x); });
       S.bills = (S.bills || []).filter(x => x.wallet !== id); save(); closeSheet(); render(); }
     else { b.dataset.sure = '1'; b.textContent = 'Ketuk lagi: hapus dompet beserta transaksinya'; } return; }
   if (d.pay) return payBill(d.pay);
