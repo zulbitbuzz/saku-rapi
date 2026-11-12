@@ -61,6 +61,12 @@ button{cursor:pointer;border:0;background:none;padding:0}
 .hero .mini{flex:1;min-width:0;background:var(--hero-soft);border-radius:14px;padding:10px 12px}
 .hero .mini span{display:block;font-size:12px;opacity:.85}
 .hero .mini b{font-family:var(--display);font-size:15px;overflow-wrap:anywhere}
+.hero .today{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;margin-top:10px;background:var(--hero-soft);border:0;border-radius:14px;padding:10px 12px;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.hero .today span{font-size:12px;opacity:.85}
+.hero .today b{font-family:var(--display);font-size:15px}
+.day{display:flex;justify-content:space-between;gap:10px}
+.day .num{text-transform:none;letter-spacing:0}
+.dayrow{display:flex;justify-content:space-between;gap:10px;font-size:14px}
 
 h2{font-family:var(--display);font-size:16px;font-weight:700;margin:0;text-wrap:balance}
 .sec{display:flex;flex-direction:column;gap:10px}
@@ -309,10 +315,10 @@ function setKas(w, id){
 }
 const inGroup = (t, g) => { const a = wal(t.wallet), b = wal(t.to); return (a && a.group === g) || (b && b.group === g); };
 const flow = (g, ym) => { let i = 0, o = 0;
-  S.txs.forEach(t => { const w = wal(t.wallet); if (!w || w.group !== g || t.date.slice(0,7) !== ym) return;
+  S.txs.forEach(t => { const w = wal(t.wallet); if (!w || w.group !== g || !t.date.startsWith(ym)) return;
     if (t.type === 'in') i += t.amount; if (t.type === 'out') o += t.amount; });
   return {i, o}; };
-const sorted = () => [...S.txs].sort((a, b) => b.date.localeCompare(a.date));
+const sorted = () => [...S.txs].reverse().sort((a, b) => b.date.localeCompare(a.date));
 
 let view = 'beranda', filter = 'semua', repGroup = 'pribadi', repYm = iso(new Date()).slice(0,7);
 const VIEWS = ['beranda','transaksi','dompet','laporan'];
@@ -338,7 +344,7 @@ function budgetRows(ym){ const spent = {};
   return Object.entries(S.budgets || {}).filter(e => e[1] > 0).map(([id, lim]) => ({c:catOf(id), lim, used:spent[id] || 0, pct:Math.round((spent[id] || 0) / lim * 100)})); }
 
 function renderBeranda(){
-  const ym = ago(0).slice(0,7), f = flow('pribadi', ym);
+  const ym = ago(0).slice(0,7), f = flow('pribadi', ym), today = flow('pribadi', ago(0));
   const recent = sorted().slice(0, 5), bills = billsNow(), warn = budgetRows(ym).filter(r => r.pct >= 80);
   return `
   <section class="hero">
@@ -351,6 +357,7 @@ function renderBeranda(){
       <div class="mini"><span>Masuk bulan ini</span><b class="num">${sal(f.i)}</b></div>
       <div class="mini"><span>Keluar bulan ini</span><b class="num">${sal(f.o)}</b></div>
     </div>
+    <button class="today" data-go="laporan"><span>Keluar hari ini</span><b class="num">${sal(today.o)}</b></button>
   </section>
   ${warn.length ? `<div class="alert">${warn.map(r => `<div>${r.c[1]} Anggaran <b>${esc(r.c[2])}</b> ${r.pct >= 100 ? 'sudah habis' : 'hampir habis'} (${r.pct}%)</div>`).join('')}</div>` : ''}
   <section class="sec">
@@ -375,7 +382,8 @@ function txListHtml(){
     && (!q || [t.note, catOf(t.cat)[2], (wal(t.wallet) || {}).name, (wal(t.to) || {}).name].join(' ').toLowerCase().includes(q)));
   if (!list.length) return '<div class="list"><div class="empty">Tidak ada transaksi di sini.</div></div>';
   const days = {}; list.forEach(t => (days[t.date] = days[t.date] || []).push(t));
-  return Object.keys(days).map(d => `<section class="sec"><div class="day">${dayLabel(d)}</div><div class="list">${days[d].map(txRow).join('')}</div></section>`).join('');
+  const dayOut = d => days[d].reduce((s, t) => s + (t.type === 'out' ? t.amount : 0), 0);
+  return Object.keys(days).map(d => `<section class="sec"><div class="day"><span>${dayLabel(d)}</span>${dayOut(d) ? `<span class="num">Keluar ${sal(dayOut(d))}</span>` : ''}</div><div class="list">${days[d].map(txRow).join('')}</div></section>`).join('');
 }
 function renderTransaksi(){
   const chips = [['semua','Semua'], ...Object.keys(GROUPS).map(g => [g, GROUPS[g].label])];
@@ -401,6 +409,11 @@ function renderLaporan(){
   S.txs.forEach(t => { const w = wal(t.wallet);
     if (t.type === 'out' && w && w.group === repGroup && t.date.slice(0,7) === repYm) by[t.cat] = (by[t.cat] || 0) + t.amount; });
   const rows = Object.entries(by).sort((a, b) => b[1] - a[1]), max = rows.length ? rows[0][1] : 1;
+  const perDay = {};
+  S.txs.forEach(t => { const w = wal(t.wallet);
+    if (t.type === 'out' && w && w.group === repGroup && t.date.startsWith(repYm)) perDay[t.date] = (perDay[t.date] || 0) + t.amount; });
+  const dRows = Object.entries(perDay).sort((a, b) => b[0].localeCompare(a[0])), dMax = Math.max(1, ...dRows.map(r => r[1]));
+  const daysIn = repYm === ago(0).slice(0,7) ? Number(ago(0).slice(8)) : new Date(+repYm.slice(0,4), +repYm.slice(5), 0).getDate();
   const br = repGroup === 'pribadi' ? budgetRows(repYm) : [];
   return `
   <div class="chips">${['pribadi','kantor'].map(g => `<button class="chip" data-rep="${g}" aria-pressed="${repGroup === g}">${GROUPS[g].label}</button>`).join('')}</div>
@@ -416,6 +429,10 @@ function renderLaporan(){
   <section class="sec"><h2>Pengeluaran per kategori</h2>
   ${rows.length ? `<div class="bars">${rows.map(([id, v]) => { const c = catOf(id);
     return `<div><div class="bar-top"><span>${c[1]} ${esc(c[2])}</span><span class="num"><b>${rp(v)}</b> · ${f.o ? Math.round(v / f.o * 100) : 0}%</span></div><div class="track"><div class="fill" style="width:${Math.max(3, v / max * 100)}%"></div></div></div>`; }).join('')}</div>`
+    : '<div class="list"><div class="empty">Tidak ada pengeluaran di bulan ini.</div></div>'}
+  </section>
+  <section class="sec"><div class="sec-head"><h2>Pengeluaran per hari</h2>${dRows.length ? `<small class="num">Rata-rata ${rp(Math.round(f.o / Math.max(1, daysIn)))}/hari</small>` : ''}</div>
+  ${dRows.length ? `<div class="bars">${dRows.map(([d, v]) => `<div><div class="bar-top"><span>${dayLabel(d)}</span><span class="num"><b>${rp(v)}</b></span></div><div class="track"><div class="fill" style="width:${Math.max(3, v / dMax * 100)}%"></div></div></div>`).join('')}</div>`
     : '<div class="list"><div class="empty">Tidak ada pengeluaran di bulan ini.</div></div>'}
   </section>`;
 }
@@ -813,7 +830,7 @@ function openSecurity(){
     <label class="ghost" for="fImport">Pulihkan dari cadangan</label>
     <input id="fImport" type="file" accept=".json,application/json" hidden>
     <p class="err" id="impErr" hidden></p>
-    <p class="hint" style="text-align:center">Versi 12 Nov 2026<br>${esc(decodeURIComponent(location.pathname))}</p>`);
+    <p class="hint" style="text-align:center">Versi 12 Nov 2026 (2)<br>${esc(decodeURIComponent(location.pathname))}</p>`);
 }
 let pendingImport = null;
 async function exportData(){
