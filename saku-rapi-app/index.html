@@ -441,6 +441,12 @@ function openAdd(tx){
     </div>
     <div class="amount"><span>Rp</span><input id="fAmount" inputmode="numeric" placeholder="0" autocomplete="off" aria-label="Nominal"></div>
     <div class="field" id="catField"><span class="lab">Kategori</span><div class="cats" id="cats"></div></div>
+    <div class="scan" id="newCatBox" hidden>
+      <div class="field"><label for="ncName" id="ncLab">Nama kategori baru</label><input id="ncName" maxlength="16" placeholder="Contoh: Anak, Sedekah"></div>
+      <div class="field"><span class="lab">Pilih logo</span><div class="cats emo" id="ncEmoji"></div></div>
+      <p class="err" id="ncErr" hidden></p>
+      <div class="two"><button class="ghost" data-act="ncCancel">Batal</button><button class="primary" data-act="ncSave">Tambah</button></div>
+    </div>
     <div class="field" id="debtField" hidden><label for="fDebt" id="debtLab">Dipinjamkan ke</label><select id="fDebt"></select><input id="fDebtNew" placeholder="Nama orang yang meminjam" maxlength="30" hidden></div>
     <div class="two">
       <div class="field"><label for="fWallet" id="walletLab">Dari dompet</label><select id="fWallet">${walletOpts()}</select></div>
@@ -479,7 +485,8 @@ function drawDebt(){
 }
 function drawCats(){
   const list = cats(form.type);
-  $('cats').innerHTML = list.map(c => `<button class="cat" data-cat="${c[0]}" aria-pressed="${form.cat === c[0]}"><span class="e">${c[1]}</span><span>${esc(c[2])}</span></button>`).join('');
+  $('cats').innerHTML = list.map(c => `<button class="cat" data-cat="${c[0]}" aria-pressed="${form.cat === c[0]}"><span class="e">${c[1]}</span><span>${esc(c[2])}</span></button>`).join('')
+    + '<button class="cat" data-act="newcat"><span class="e">➕</span><span>Baru</span></button>';
   drawDebt();
 }
 function setType(t){
@@ -620,7 +627,25 @@ function saveBudgets(){
 }
 
 /* ---------- kategori sendiri ---------- */
-const CAT_EMOJI = ['🍰','🍔','🐶','🐱','👶','🎓','🏋️','✈️','🏠','🚗','👕','💄','🎮','📚','🧾','🕌','💝','🧺','🔧','📱','🍼','💇','🏖️','💰','🧧','🛍️','🎵','🚬','🐟','🌿'];
+const CAT_EMOJI = ['🍰','🍔','🐶','🐱','👶','🎓','🏋️','✈️','🏠','🚗','👕','💄','🎮','📚','🧾','🕌','💝','🧺','🔧','📱','🍼','💇','🏖️','💰','🧧','🛍️','🎵','🚬','🐟','🌿',
+  '🍕','🍦','🧋','🍱','🎂','🐾','🧸','🎈','💐','🚲','🏍️','🧹','💧','🪴','🧴','💊','🎤','📷','🧑‍🏫','👟','⚽','🙏'];
+function openNewCat(){
+  const box = $('newCatBox'); box.hidden = false;
+  $('ncLab').textContent = form.type === 'in' ? 'Nama kategori pemasukan baru' : 'Nama kategori pengeluaran baru';
+  $('ncName').value = ''; $('ncErr').hidden = true;
+  $('ncEmoji').innerHTML = CAT_EMOJI.map((e, i) => `<button class="cat" data-pick="${e}" aria-pressed="${i === 0}"><span class="e">${e}</span></button>`).join('');
+  box.scrollIntoView({block:'nearest'}); $('ncName').focus();
+}
+function saveNewCat(){
+  const name = $('ncName').value.trim(), t = form.type;
+  if (!name) { $('ncErr').textContent = 'Isi nama kategori.'; $('ncErr').hidden = false; return; }
+  const same = cats(t).find(c => c[2].toLowerCase() === name.toLowerCase());
+  if (same) form.cat = same[0];
+  else { const em = document.querySelector('#ncEmoji [aria-pressed="true"]');
+    S.cats = S.cats || {}; S.cats[t] = S.cats[t] || [];
+    const c = ['c' + uid(), em ? em.dataset.pick : '📦', name]; S.cats[t].push(c); form.cat = c[0]; save(); }
+  $('newCatBox').hidden = true; drawCats();
+}
 function openCats(){
   const mine = t => ((S.cats && S.cats[t]) || []);
   const rows = t => mine(t).map(c => `<div class="item"><span class="ico">${c[1]}</span><span class="mid"><b>${esc(c[2])}</b><span>${t === 'out' ? 'Pengeluaran' : 'Pemasukan'}</span></span><button class="pay del" data-delcat="${c[0]}">Hapus</button></div>`).join('');
@@ -769,7 +794,8 @@ function openSecurity(){
     <button class="ghost" data-act="export">Simpan cadangan</button>
     <label class="ghost" for="fImport">Pulihkan dari cadangan</label>
     <input id="fImport" type="file" accept=".json,application/json" hidden>
-    <p class="err" id="impErr" hidden></p>`);
+    <p class="err" id="impErr" hidden></p>
+    <p class="hint" style="text-align:center">Versi 12 Nov 2026<br>${esc(decodeURIComponent(location.pathname))}</p>`);
 }
 let pendingImport = null;
 async function exportData(){
@@ -858,7 +884,10 @@ document.addEventListener('click', e => {
   if (d.pay) return payBill(d.pay);
   if (d.delbill) { S.bills = (S.bills || []).filter(x => x.id !== d.delbill); save(); render(); return openBills(); }
   if (d.delcat) { ['out','in'].forEach(t => { if (S.cats && S.cats[t]) S.cats[t] = S.cats[t].filter(c => c[0] !== d.delcat); }); save(); render(); return openCats(); }
-  if (d.pick) { document.querySelectorAll('#cEmoji .cat').forEach(x => x.setAttribute('aria-pressed', x === b)); return; }
+  if (d.pick) { b.parentElement.querySelectorAll('.cat').forEach(x => x.setAttribute('aria-pressed', x === b)); return; }
+  if (d.act === 'newcat') return openNewCat();
+  if (d.act === 'ncSave') return saveNewCat();
+  if (d.act === 'ncCancel') { $('newCatBox').hidden = true; return; }
   if (d.act === 'bills') return openBills();
   if (d.act === 'saveBill') return saveBill();
   if (d.act === 'budgets') return openBudgets();
