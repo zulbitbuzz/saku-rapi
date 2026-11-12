@@ -285,6 +285,23 @@ const kasHosts = () => S.wallets.filter(w => w.group === 'pribadi' && wal(w.kasI
 const kasTotal = () => kasHosts().reduce((s, w) => s + kasHeld(w), 0);
 const showBal = w => bal(w) - (S.netKas ? kasHeld(w) : 0);
 const pribadiTotal = () => groupTotal('pribadi') - (S.netKas ? kasTotal() : 0);
+const hasKas = () => S.wallets.some(w => w.group === 'kantor');
+function openKasSetup(){
+  const ps = S.wallets.filter(w => w.group === 'pribadi'), ks = S.wallets.filter(w => w.group === 'kantor');
+  const opts = list => list.map(w => `<option value="${w.id}">${esc(w.name)} — ${sal(bal(w))}</option>`).join('');
+  openSheet(`${head('Kurangi uang kas')}
+    <p class="hint">Pilih rekening pribadi tempat uang kas kantor ikut disimpan. Setelah itu saldo pribadi bisa ditampilkan dengan atau tanpa uang kas lewat tombol di Beranda.</p>
+    <div class="field"><label for="ksHost">Uang kas disimpan di</label><select id="ksHost">${opts(ps)}</select></div>
+    <div class="field"><label for="ksKas">Dompet kas kantor</label><select id="ksKas">${opts(ks)}</select></div>
+    <p class="hint">Pastikan saldo rekening ini di aplikasi sama dengan saldo asli di aplikasi bank (termasuk uang kas). Ubah lewat menu Dompet kalau belum sama.</p>
+    <p class="err" id="ksErr" hidden></p>
+    <button class="primary" data-act="kasSave">Simpan dan kurangi uang kas</button>`);
+}
+function saveKasSetup(){
+  const h = wal($('ksHost').value), k = $('ksKas').value;
+  if (!h || !wal(k)) { $('ksErr').textContent = 'Tambahkan dompet pribadi dan dompet kas kantor dulu di menu Dompet.'; $('ksErr').hidden = false; return; }
+  setKas(h, k); S.netKas = true; save(); closeSheet(); render();
+}
 function setKas(w, id){
   if (wal(w.kasIn)) w.init += flowOf(wal(w.kasIn));
   delete w.kasIn;
@@ -326,7 +343,7 @@ function renderBeranda(){
   return `
   <section class="hero">
     <div>
-      <div class="hero-top"><div class="lbl">Saldo pribadi</div>${kasHosts().length ? `<button class="hero-tog" data-netkas="${S.netKas ? 0 : 1}">${S.netKas ? 'Tampilkan dengan kas' : 'Kurangi uang kas'}</button>` : ''}</div>
+      <div class="hero-top"><div class="lbl">Saldo pribadi</div>${kasHosts().length ? `<button class="hero-tog" data-netkas="${S.netKas ? 0 : 1}">${S.netKas ? 'Tampilkan dengan kas' : 'Kurangi uang kas'}</button>` : hasKas() ? '<button class="hero-tog" data-act="kasSetup">Kurangi uang kas</button>' : ''}</div>
       <div class="big num">${sal(pribadiTotal())}</div>
       ${kasHosts().length ? `<div class="lbl num">${S.netKas ? 'Sudah dikurangi' : 'Termasuk'} uang kas ${sal(kasTotal())}</div>` : ''}
     </div>
@@ -375,7 +392,8 @@ function renderDompet(){
       return `<button class="item" data-wallet="${w.id}"><span class="ico">${esc(w.emoji)}</span><span class="mid"><b>${esc(w.name)}</b>${wal(w.kasIn) ? `<span class="wrap num">${S.netKas ? 'Sudah dikurangi' : 'Termasuk'} kas ${sal(kasHeld(w))}</span>` : ''}<span>${w.target ? `Target ${sal(w.target)} · ${pct}%` : g === 'piutang' && bal(w) <= 0 ? 'Lunas' : GROUPS[g].desc}</span>${w.target ? `<span class="track"><span class="fill" style="width:${Math.min(100, Math.max(0, pct))}%"></span></span>` : ''}</span><span class="amt num">${sal(showBal(w))}</span><span class="edit-ic" aria-hidden="true">✎</span></button>`; }).join('')
       : `<div class="empty">Belum ada ${ADD_LABEL[g]}.</div>`}</div>
     <button class="ghost" data-addwallet="${g}">+ Tambah ${ADD_LABEL[g]}</button></section>`; });
-  const tog = kasHosts().length ? `<div class="chips"><button class="chip" data-netkas="0" aria-pressed="${!S.netKas}">Termasuk uang kas</button><button class="chip" data-netkas="1" aria-pressed="${!!S.netKas}">Dikurangi uang kas</button></div>` : '';
+  const tog = kasHosts().length ? `<div class="chips"><button class="chip" data-netkas="0" aria-pressed="${!S.netKas}">Termasuk uang kas</button><button class="chip" data-netkas="1" aria-pressed="${!!S.netKas}">Dikurangi uang kas</button></div>`
+    : hasKas() ? '<button class="ghost" data-act="kasSetup">Uang kas kantor tercampur di rekening pribadi? Atur di sini</button>' : '';
   return tog + '<p class="hint">Ketuk baris mana pun (tanda ✎) untuk mengubah nama atau saldonya.</p>' + html;
 }
 function renderLaporan(){
@@ -885,6 +903,8 @@ document.addEventListener('click', e => {
   if (d.delbill) { S.bills = (S.bills || []).filter(x => x.id !== d.delbill); save(); render(); return openBills(); }
   if (d.delcat) { ['out','in'].forEach(t => { if (S.cats && S.cats[t]) S.cats[t] = S.cats[t].filter(c => c[0] !== d.delcat); }); save(); render(); return openCats(); }
   if (d.pick) { b.parentElement.querySelectorAll('.cat').forEach(x => x.setAttribute('aria-pressed', x === b)); return; }
+  if (d.act === 'kasSetup') return openKasSetup();
+  if (d.act === 'kasSave') return saveKasSetup();
   if (d.act === 'newcat') return openNewCat();
   if (d.act === 'ncSave') return saveNewCat();
   if (d.act === 'ncCancel') { $('newCatBox').hidden = true; return; }
